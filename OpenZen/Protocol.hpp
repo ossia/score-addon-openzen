@@ -98,7 +98,8 @@ private:
     ossia::net::parameter_base* timestamp{};
     ossia::net::parameter_base* frame{};
 
-    ossia::net::parameter_base* gnss_position{};
+    ossia::net::parameter_base* gnss_latitude{};
+    ossia::net::parameter_base* gnss_longitude{};
     ossia::net::parameter_base* gnss_altitude{};
     ossia::net::parameter_base* gnss_velocity{};
     ossia::net::parameter_base* gnss_heading{};

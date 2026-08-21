@@ -51,6 +51,8 @@ make(ossia::net::node_base& root, const char* path, const char* type)
   auto* p = ossia::create_parameter(root, path, type);
   if(p)
     p->set_access(ossia::access_mode::GET);
+  else
+    ossia::logger().error("openzen: cannot create {} as '{}'", path, type);
   return p;
 }
 
@@ -60,6 +62,8 @@ make_rw(ossia::net::node_base& root, const char* path, const char* type)
   auto* p = ossia::create_parameter(root, path, type);
   if(p)
     p->set_access(ossia::access_mode::SET);
+  else
+    ossia::logger().error("openzen: cannot create {} as '{}'", path, type);
   return p;
 }
 
@@ -191,7 +195,11 @@ void protocol::build_gnss_tree(ossia::net::node_base& root)
 {
   // Always present: whether the sensor has a GNSS component is only known
   // after connecting, and the tree must not change shape when it does.
-  m_params.gnss_position = make(root, "/gnss/position", "geo");
+  //
+  // ossia's position dataspace has no geographic unit, so latitude and
+  // longitude are plain values here, as in score's GPS protocol.
+  m_params.gnss_latitude = make(root, "/gnss/latitude", "float");
+  m_params.gnss_longitude = make(root, "/gnss/longitude", "float");
   m_params.gnss_altitude = make(root, "/gnss/altitude", "float");
   m_params.gnss_velocity = make(root, "/gnss/velocity", "float");
   m_params.gnss_heading = make(root, "/gnss/heading", "float");
@@ -269,10 +277,8 @@ void protocol::on_gnss_data(const ZenGnssData& d)
   if(!m_ready)
     return;
 
-  emit(
-      m_params.gnss_position,
-      ossia::value{
-          std::array<float, 3>{float(d.latitude), float(d.longitude), float(d.height)}});
+  emit(m_params.gnss_latitude, float(d.latitude));
+  emit(m_params.gnss_longitude, float(d.longitude));
   emit(m_params.gnss_altitude, float(d.height));
   emit(m_params.gnss_velocity, float(d.velocity));
   emit(m_params.gnss_heading, float(d.headingOfVehicle));
