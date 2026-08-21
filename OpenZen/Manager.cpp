@@ -11,6 +11,12 @@
 #include <cstring>
 #include <optional>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <grp.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace ossia::openzen
 {
 namespace
@@ -38,6 +44,40 @@ std::string identity_key(const session_config& c)
   // Serial first: it is the identity that survives a replug onto another port.
   return c.io_type + '|'
          + (!c.serial.empty() && c.match_by_serial ? c.serial : c.identifier);
+}
+
+/**
+ * Explain why a port could not be opened.
+ *
+ * OpenZen reports every open failure as InvalidAddress, which is not much to
+ * go on when the real reason is that the serial port belongs to a group the
+ * user is not in - a first-run stumbling block on Linux.
+ */
+std::string explain_open_failure(const std::string& identifier)
+{
+#if defined(__unix__) || defined(__APPLE__)
+  if(identifier.empty() || identifier.front() != '/')
+    return {};
+
+  if(::access(identifier.c_str(), F_OK) != 0)
+    return identifier + " is gone";
+
+  if(::access(identifier.c_str(), R_OK | W_OK) != 0)
+  {
+    std::string msg = "no permission to open " + identifier;
+    struct ::stat st{};
+    if(::stat(identifier.c_str(), &st) == 0)
+    {
+      if(const auto* gr = ::getgrgid(st.st_gid))
+        msg += std::string{" (owned by group '"} + gr->gr_name
+               + "'; add your user to it and log back in)";
+    }
+    return msg;
+  }
+#else
+  (void)identifier;
+#endif
+  return {};
 }
 
 void copy_field(char* dst, std::size_t n, const std::string& src) noexcept
@@ -153,8 +193,12 @@ struct manager::impl
   bool scan_in_progress{false};
   clock::time_point scan_started{};
   clock::time_point last_scan{};
+  std::chrono::milliseconds scan_pace{k_scan_interval};
   sensor_list scan_accumulator;
   sensor_list last_results; //! backend-thread copy, for candidate resolution
+
+  //! Consumer-side cache for sensors(); GUI thread only.
+  mutable sensor_list last_published;
 
   // --- pump ---
   struct timer_context
@@ -489,7 +533,17 @@ struct manager::impl
     b.backoff = std::min(b.backoff * 2, k_backoff_max);
     b.next_attempt = now + b.backoff;
     s.m_state.store(link_state::failed);
-    emit_event(s, link_state::failed, "could not open the sensor");
+
+    std::string why;
+    for(const auto& desc : candidates)
+    {
+      why = explain_open_failure(desc.identifier);
+      if(!why.empty())
+        break;
+    }
+    emit_event(
+        s, link_state::failed,
+        why.empty() ? std::string{"could not open the sensor"} : why);
   }
 
   /**
@@ -562,6 +616,63 @@ struct manager::impl
   }
 
   /**
+   * Read back what the sensor is actually going to send us.
+   *
+   * The same firmware split as apply_outputs: on the legacy firmware a single
+   * OutputRawAcc flag produces both the raw and the host-calibrated vector,
+   * while IG1 gates them separately.
+   */
+  static capabilities
+  read_capabilities(zen::ZenSensorComponent& imu, const std::string& model, bool has_gnss)
+  {
+    const auto get = [&](int property) {
+      auto [err, value] = imu.getBoolProperty(property);
+      return err == ZenError_None && value;
+    };
+
+    capabilities c;
+    c.gnss = has_gnss;
+    c.quaternion = get(ZenImuProperty_OutputQuat);
+    c.euler = get(ZenImuProperty_OutputEuler);
+    c.angular_velocity = get(ZenImuProperty_OutputAngularVel);
+    c.linear_accel = get(ZenImuProperty_OutputLinearAcc);
+    c.pressure = get(ZenImuProperty_OutputPressure);
+    c.altitude = get(ZenImuProperty_OutputAltitude);
+    c.temperature = get(ZenImuProperty_OutputTemperature);
+    c.heave = get(ZenImuProperty_OutputHeaveMotion);
+
+    const bool ig1
+        = imu.getBoolProperty(ZenImuProperty_OutputAccCalibrated).first == ZenError_None;
+
+    c.accel_raw = get(ZenImuProperty_OutputRawAcc);
+    c.mag_raw = get(ZenImuProperty_OutputRawMag);
+
+    if(!ig1)
+    {
+      // One flag each, and it fills both the raw and the calibrated vector.
+      c.accel = c.accel_raw;
+      c.mag = c.mag_raw;
+      c.gyro = c.gyro_raw = get(ZenImuProperty_OutputRawGyr);
+      return c;
+    }
+
+    c.accel = get(ZenImuProperty_OutputAccCalibrated);
+    c.mag = get(ZenImuProperty_OutputMagCalib);
+
+    if(model.find("BE1") != std::string::npos)
+    {
+      c.gyro_raw = get(ZenImuProperty_OutputRawGyr1);
+      c.gyro = get(ZenImuProperty_OutputGyr1AlignCalib);
+    }
+    else
+    {
+      c.gyro_raw = get(ZenImuProperty_OutputRawGyr0);
+      c.gyro = get(ZenImuProperty_OutputGyr0AlignCalib);
+    }
+    return c;
+  }
+
+  /**
    * Push the whole configuration onto the sensor and start streaming.
    *
    * Applied on every (re)connection, so what the document says is always what
@@ -592,7 +703,11 @@ struct manager::impl
        e == ZenError_None)
       model = m;
 
-    apply_outputs(*imu, c, model);
+    // By default the sensor keeps whatever measurements it is set up for and
+    // we simply report them; overriding is opt-in, for trading measurements
+    // against bandwidth.
+    if(!c.auto_outputs)
+      apply_outputs(*imu, c, model);
 
     if(c.sampling_rate > 0)
     {
@@ -621,8 +736,12 @@ struct manager::impl
 
     auto& b = *s.m_backend;
     b.imu.emplace(*imu);
-    if(auto gnss = sensor.getAnyComponentOfType(g_zenSensorType_Gnss))
+    auto gnss = sensor.getAnyComponentOfType(g_zenSensorType_Gnss);
+    if(gnss)
       b.gnss.emplace(*gnss);
+
+    ev.caps_valid = true;
+    ev.caps = read_capabilities(*imu, model, bool(gnss));
     b.sensor_handle = sensor.sensor().handle;
     b.sensor.emplace(std::move(sensor));
 
@@ -693,6 +812,11 @@ struct manager::impl
             sd.identifier = d.identifier;
             sd.baud_rate = d.baudRate;
             scan_accumulator.push_back(std::move(sd));
+            // Publish straight away rather than waiting for the whole listing.
+            // OpenZen walks every IO system in one pass, and a Bluetooth
+            // inquiry takes ten seconds or more; a USB sensor must not be
+            // held back behind it.
+            publish_discovery();
             break;
           }
           case ZenEventType_SensorListingProgress:
@@ -712,7 +836,7 @@ struct manager::impl
 
     const bool wanted = scan_refcount.load(std::memory_order_relaxed) > 0
                         || scan_requested.load(std::memory_order_relaxed);
-    if(wanted && now - last_scan >= k_scan_interval)
+    if(wanted && now - last_scan >= scan_pace)
     {
       scan_requested.store(false, std::memory_order_relaxed);
       scan_accumulator.clear();
@@ -722,12 +846,30 @@ struct manager::impl
     }
   }
 
+  //! Make the devices found so far visible to the rest of the application.
+  void publish_discovery()
+  {
+    last_results = scan_accumulator;
+    sensor_list copy = scan_accumulator;
+    discovered.produce(std::move(copy));
+  }
+
   void finish_scan()
   {
     scan_in_progress = false;
-    last_scan = clock::now();
-    last_results = scan_accumulator;
-    discovered.produce(std::move(scan_accumulator));
+    const auto now = clock::now();
+
+    // A listing that had to wait on a Bluetooth inquiry should not be
+    // restarted two seconds later: pace the next one by how long this one
+    // actually took.
+    const auto elapsed
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now - scan_started);
+    scan_pace = std::max(k_scan_interval, elapsed);
+    last_scan = now;
+
+    // Final and authoritative: this is the publication that also drops
+    // devices which have gone away.
+    publish_discovery();
     scan_accumulator.clear();
   }
 
@@ -845,9 +987,11 @@ void manager::release(const session_ptr& s)
 
 sensor_list manager::sensors() const
 {
-  sensor_list out;
-  m_impl->discovered.consume(out);
-  return out;
+  // consume() only writes through when the producer has published something
+  // new, so the latest listing has to be kept on this side; otherwise every
+  // call but the one right after a scan would report an empty list.
+  m_impl->discovered.consume(m_impl->last_published);
+  return m_impl->last_published;
 }
 
 void manager::set_scanning(bool enable)

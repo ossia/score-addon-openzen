@@ -55,6 +55,32 @@ struct sensor_desc
 };
 using sensor_list = std::vector<sensor_desc>;
 
+/**
+ * What a sensor actually measures, as read back from the hardware.
+ *
+ * This is what the node tree is built from: the user should not have to know
+ * whether their unit has a magnetometer or a barometer, and a sensor whose
+ * output configuration is changed elsewhere should still line up with what
+ * score shows.
+ */
+struct capabilities
+{
+  bool accel{}, accel_raw{};
+  bool gyro{}, gyro_raw{};
+  bool mag{}, mag_raw{};
+  bool quaternion{};
+  bool euler{};
+  bool angular_velocity{};
+  bool linear_accel{};
+  bool pressure{};
+  bool altitude{};
+  bool temperature{};
+  bool heave{};
+  bool gnss{};
+
+  bool operator==(const capabilities&) const noexcept = default;
+};
+
 /** Everything a link can tell the score side about itself. */
 struct link_event
 {
@@ -66,6 +92,10 @@ struct link_event
   std::string model;
   std::string serial;
   std::string firmware;
+
+  //! Read back from the sensor on connection; drives the node tree.
+  bool caps_valid{false};
+  capabilities caps;
 };
 
 /**
@@ -90,7 +120,15 @@ struct session_config
   bool auto_reconnect{true};
   std::chrono::milliseconds watchdog{500};
 
-  /** Measurement groups to enable on the sensor. Indexed by output_id. */
+  /**
+   * Take the sensor's own output configuration as it is, rather than imposing
+   * `outputs` on it. This is the default: what a unit measures is read back
+   * from the hardware and turned into nodes, so nothing has to be picked by
+   * hand. Turn it off only to trade measurements for bandwidth.
+   */
+  bool auto_outputs{true};
+
+  /** Measurement groups to enable, when auto_outputs is off. */
   std::array<bool, 11> outputs{};
 };
 

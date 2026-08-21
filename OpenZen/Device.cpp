@@ -27,7 +27,12 @@ DeviceImplementation::DeviceImplementation(
   m_capas.canRemoveNode = false;
   m_capas.canRenameNode = false;
   m_capas.canSetProperties = false;
-  m_capas.canSerialize = false;
+  // The measurement nodes are learned from the hardware, so the tree has to
+  // be saved with the document: otherwise reopening a score with the sensor
+  // unplugged would come back without them, and every cable drawn against
+  // them would dangle. createNodeFromPath is create-or-get, so restoring
+  // saved nodes on top of the ones we build here is not a duplication.
+  m_capas.canSerialize = true;
 }
 
 DeviceImplementation::~DeviceImplementation() = default;

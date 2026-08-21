@@ -28,6 +28,7 @@ session_config to_config(const OpenZen::SpecificSettings& s)
   c.filter_mode = s.filterMode;
   c.degrees = s.degrees;
   c.auto_reconnect = s.autoReconnect;
+  c.auto_outputs = s.autoOutputs;
   c.watchdog = std::chrono::milliseconds{s.watchdogMs > 0 ? s.watchdogMs : 500};
 
   const auto& o = s.outputs;
@@ -42,6 +43,24 @@ session_config to_config(const OpenZen::SpecificSettings& s)
   c.outputs[out_altitude] = o.altitude;
   c.outputs[out_temperature] = o.temperature;
   c.outputs[out_heave] = o.heave;
+  return c;
+}
+
+//! The measurement set the user imposed, seen as capabilities.
+capabilities to_caps(const OpenZen::OutputSettings& o)
+{
+  capabilities c;
+  c.accel = c.accel_raw = o.accel;
+  c.gyro = c.gyro_raw = o.gyro;
+  c.mag = c.mag_raw = o.mag;
+  c.quaternion = o.quaternion;
+  c.euler = o.euler;
+  c.angular_velocity = o.angularVelocity;
+  c.linear_accel = o.linearAccel;
+  c.pressure = o.pressure;
+  c.altitude = o.altitude;
+  c.temperature = o.temperature;
+  c.heave = o.heave;
   return c;
 }
 
@@ -122,7 +141,15 @@ void protocol::stop()
 void protocol::set_device(ossia::net::device_base& dev)
 {
   m_device = &dev;
-  build_tree(dev.get_root_node());
+  build_base_tree(dev.get_root_node());
+
+  // If the user chose to impose a measurement set, the nodes for it can exist
+  // straight away. Otherwise they appear when the sensor tells us what it
+  // measures - and score restores the ones it saved from the last session, so
+  // a document still opens with its full tree when nothing is plugged in.
+  if(!m_settings.autoOutputs)
+    ensure_nodes(to_caps(m_settings.outputs));
+
   m_ready = true;
 
   if(m_params.status)
@@ -131,10 +158,8 @@ void protocol::set_device(ossia::net::device_base& dev)
     m_params.connected->push_value(false);
 }
 
-void protocol::build_tree(ossia::net::node_base& root)
+void protocol::build_base_tree(ossia::net::node_base& root)
 {
-  const auto& o = m_settings.outputs;
-
   m_params.connected = make(root, "/connected", "bool");
   m_params.status = make(root, "/status", "string");
 
@@ -142,48 +167,8 @@ void protocol::build_tree(ossia::net::node_base& root)
   m_params.serial = make(root, "/info/serial", "string");
   m_params.firmware = make(root, "/info/firmware", "string");
 
-  // The orientation units let score convert between quaternion, euler and
-  // axis-angle representations wherever these are used.
-  if(o.quaternion)
-    m_params.quaternion = make(root, "/imu/quaternion", "quaternion");
-  if(o.euler)
-    m_params.euler = make(root, "/imu/euler", "euler");
-
-  if(o.accel)
-  {
-    m_params.accel = make(root, "/imu/accel", "vec3f");
-    m_params.raw_accel = make(root, "/imu/raw/accel", "vec3f");
-  }
-  if(o.gyro)
-  {
-    m_params.gyro = make(root, "/imu/gyro", "vec3f");
-    m_params.raw_gyro = make(root, "/imu/raw/gyro", "vec3f");
-  }
-  if(o.mag)
-  {
-    m_params.mag = make(root, "/imu/mag", "vec3f");
-    m_params.raw_mag = make(root, "/imu/raw/mag", "vec3f");
-  }
-  if(o.angularVelocity)
-    m_params.angular_velocity = make(root, "/imu/angular_velocity", "vec3f");
-  if(o.linearAccel)
-    m_params.linear_accel = make(root, "/imu/linear_accel", "vec3f");
-  if(o.pressure)
-    m_params.pressure = make(root, "/imu/pressure", "float");
-  if(o.altitude)
-    m_params.altitude = make(root, "/imu/altitude", "float");
-  if(o.temperature)
-  {
-    m_params.temperature = make(root, "/imu/temperature", "float");
-    m_params.gyro_temperature = make(root, "/imu/gyro_temperature", "float");
-  }
-  if(o.heave)
-    m_params.heave = make(root, "/imu/heave", "float");
-
   m_params.timestamp = make(root, "/imu/timestamp", "float");
   m_params.frame = make(root, "/imu/frame", "int");
-
-  build_gnss_tree(root);
 
   m_params.ctl_streaming = make_rw(root, "/control/streaming", "bool");
   m_params.ctl_rate = make_rw(root, "/control/rate", "int");
@@ -191,21 +176,51 @@ void protocol::build_tree(ossia::net::node_base& root)
   m_params.ctl_reset_orientation = make_rw(root, "/control/reset_orientation", "impulse");
 }
 
-void protocol::build_gnss_tree(ossia::net::node_base& root)
+void protocol::ensure_nodes(const capabilities& caps)
 {
-  // Always present: whether the sensor has a GNSS component is only known
-  // after connecting, and the tree must not change shape when it does.
-  //
+  if(!m_device)
+    return;
+
+  auto& root = m_device->get_root_node();
+  const auto add
+      = [&](ossia::net::parameter_base*& p, bool wanted, const char* path,
+            const char* type) {
+          if(wanted && !p)
+            p = make(root, path, type);
+        };
+
+  // The orientation units let score convert freely between quaternion, euler
+  // and axis-angle wherever these are used.
+  add(m_params.quaternion, caps.quaternion, "/imu/quaternion", "quaternion");
+  add(m_params.euler, caps.euler, "/imu/euler", "euler");
+
+  add(m_params.accel, caps.accel, "/imu/accel", "vec3f");
+  add(m_params.gyro, caps.gyro, "/imu/gyro", "vec3f");
+  add(m_params.mag, caps.mag, "/imu/mag", "vec3f");
+
+  add(m_params.raw_accel, caps.accel_raw, "/imu/raw/accel", "vec3f");
+  add(m_params.raw_gyro, caps.gyro_raw, "/imu/raw/gyro", "vec3f");
+  add(m_params.raw_mag, caps.mag_raw, "/imu/raw/mag", "vec3f");
+
+  add(m_params.angular_velocity, caps.angular_velocity, "/imu/angular_velocity",
+      "vec3f");
+  add(m_params.linear_accel, caps.linear_accel, "/imu/linear_accel", "vec3f");
+  add(m_params.pressure, caps.pressure, "/imu/pressure", "float");
+  add(m_params.altitude, caps.altitude, "/imu/altitude", "float");
+  add(m_params.temperature, caps.temperature, "/imu/temperature", "float");
+  add(m_params.gyro_temperature, caps.temperature, "/imu/gyro_temperature", "float");
+  add(m_params.heave, caps.heave, "/imu/heave", "float");
+
   // ossia's position dataspace has no geographic unit, so latitude and
   // longitude are plain values here, as in score's GPS protocol.
-  m_params.gnss_latitude = make(root, "/gnss/latitude", "float");
-  m_params.gnss_longitude = make(root, "/gnss/longitude", "float");
-  m_params.gnss_altitude = make(root, "/gnss/altitude", "float");
-  m_params.gnss_velocity = make(root, "/gnss/velocity", "float");
-  m_params.gnss_heading = make(root, "/gnss/heading", "float");
-  m_params.gnss_fix = make(root, "/gnss/fix", "int");
-  m_params.gnss_satellites = make(root, "/gnss/satellites", "int");
-  m_params.gnss_accuracy = make(root, "/gnss/accuracy", "vec2f");
+  add(m_params.gnss_latitude, caps.gnss, "/gnss/latitude", "float");
+  add(m_params.gnss_longitude, caps.gnss, "/gnss/longitude", "float");
+  add(m_params.gnss_altitude, caps.gnss, "/gnss/altitude", "float");
+  add(m_params.gnss_velocity, caps.gnss, "/gnss/velocity", "float");
+  add(m_params.gnss_heading, caps.gnss, "/gnss/heading", "float");
+  add(m_params.gnss_fix, caps.gnss, "/gnss/fix", "int");
+  add(m_params.gnss_satellites, caps.gnss, "/gnss/satellites", "int");
+  add(m_params.gnss_accuracy, caps.gnss, "/gnss/accuracy", "vec2f");
 }
 
 void protocol::emit(ossia::net::parameter_base* p, ossia::value&& v)
@@ -321,6 +336,12 @@ void protocol::on_link_event(const link_event& ev)
     emit(m_params.model, ev.model);
     emit(m_params.serial, ev.serial);
     emit(m_params.firmware, ev.firmware);
+  }
+
+  if(ev.caps_valid && !(ev.caps == m_caps))
+  {
+    m_caps = ev.caps;
+    ensure_nodes(m_caps);
   }
 }
 

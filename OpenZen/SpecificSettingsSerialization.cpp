@@ -63,7 +63,7 @@ template <>
 void DataStreamReader::read(const OpenZen::SpecificSettings& n)
 {
   m_stream << n.ioType << n.serialNumber << n.identifier << n.baudRate
-           << n.matchBySerial << n.samplingRate << n.filterMode << n.degrees << n.outputs
+           << n.matchBySerial << n.samplingRate << n.filterMode << n.degrees << n.autoOutputs << n.outputs
            << n.autoReconnect << n.watchdogMs << n.rate;
   insertDelimiter();
 }
@@ -72,7 +72,7 @@ template <>
 void DataStreamWriter::write(OpenZen::SpecificSettings& n)
 {
   m_stream >> n.ioType >> n.serialNumber >> n.identifier >> n.baudRate >> n.matchBySerial
-      >> n.samplingRate >> n.filterMode >> n.degrees >> n.outputs >> n.autoReconnect
+      >> n.samplingRate >> n.filterMode >> n.degrees >> n.autoOutputs >> n.outputs >> n.autoReconnect
       >> n.watchdogMs >> n.rate;
   checkDelimiter();
 }
@@ -88,6 +88,7 @@ void JSONReader::read(const OpenZen::SpecificSettings& n)
   obj["SamplingRate"] = n.samplingRate;
   obj["FilterMode"] = n.filterMode;
   obj["Degrees"] = n.degrees;
+  obj["AutoOutputs"] = n.autoOutputs;
   obj["Outputs"] = n.outputs;
   obj["AutoReconnect"] = n.autoReconnect;
   obj["WatchdogMs"] = n.watchdogMs;
@@ -108,6 +109,8 @@ void JSONWriter::write(OpenZen::SpecificSettings& n)
   n.filterMode <<= obj["FilterMode"];
   if(auto v = obj.tryGet("Degrees"))
     n.degrees = v->toBool();
+  if(auto v = obj.tryGet("AutoOutputs"))
+    n.autoOutputs = v->toBool();
   if(auto v = obj.tryGet("Outputs"))
     n.outputs <<= *v;
   if(auto v = obj.tryGet("AutoReconnect"))

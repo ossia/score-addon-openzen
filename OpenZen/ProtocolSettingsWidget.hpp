@@ -9,6 +9,7 @@
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
+class QGroupBox;
 class QSpinBox;
 
 namespace OpenZen
@@ -35,11 +36,13 @@ private:
   QSpinBox* m_samplingRate{};
   QSpinBox* m_filterMode{};
   QCheckBox* m_degrees{};
+  QCheckBox* m_autoOutputs{};
 
   QCheckBox* m_autoReconnect{};
   QSpinBox* m_watchdog{};
   QSpinBox* m_rate{};
 
+  QGroupBox* m_outputsBox{};
   struct
   {
     QCheckBox* accel{};

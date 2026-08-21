@@ -41,12 +41,29 @@ struct listener final : sensor_listener
 
   void on_imu_data(const ZenImuData&) override { imu_frames++; }
   void on_gnss_data(const ZenGnssData&) override { gnss_frames++; }
+  capabilities caps;
+  bool caps_seen{false};
+
   void on_link_event(const link_event& e) override
   {
     events++;
     last_state = to_string(e.state);
     last_message = e.message;
     std::printf("     [link] %s: %s\n", last_state.c_str(), e.message.c_str());
+    if(e.caps_valid)
+    {
+      caps = e.caps;
+      caps_seen = true;
+      std::printf("     [caps]%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n",
+                  caps.accel ? " accel" : "", caps.accel_raw ? " accel_raw" : "",
+                  caps.gyro ? " gyro" : "", caps.gyro_raw ? " gyro_raw" : "",
+                  caps.mag ? " mag" : "", caps.mag_raw ? " mag_raw" : "",
+                  caps.quaternion ? " quaternion" : "", caps.euler ? " euler" : "",
+                  caps.angular_velocity ? " angular_velocity" : "",
+                  caps.linear_accel ? " linear_accel" : "",
+                  caps.pressure ? " pressure" : "", caps.altitude ? " altitude" : "",
+                  caps.temperature ? " temperature" : "", caps.gnss ? " gnss" : "");
+    }
   }
 };
 
@@ -161,10 +178,8 @@ int main()
     cfg.serial = found[0].serial;
     cfg.identifier = found[0].identifier;
     cfg.baud_rate = found[0].baud_rate;
-    cfg.outputs[out_accel] = true;
-    cfg.outputs[out_gyro] = true;
-    cfg.outputs[out_quaternion] = true;
-    cfg.outputs[out_euler] = true;
+    // auto_outputs is on by default: what the sensor measures is read back
+    // from the hardware rather than picked here.
 
     listener l;
     auto s = mgr.acquire(cfg, l);
@@ -172,6 +187,7 @@ int main()
       spin(*ctx, 250ms);
 
     check(l.imu_frames > 0, "IMU frames arrive");
+    check(l.caps_seen, "the sensor's measurements are detected");
     const int before = l.imu_frames;
     spin(*ctx, 2s);
     const int rate = (l.imu_frames - before) / 2;

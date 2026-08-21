@@ -76,6 +76,12 @@ struct SpecificSettings
   /** Report angles in degrees rather than radians (IG1 and newer). */
   bool degrees{true};
 
+  /**
+   * Take the sensor as it comes: read back what it measures and expose
+   * exactly that. The measurements below are only consulted when this is off.
+   */
+  bool autoOutputs{true};
+
   OutputSettings outputs;
 
   /** Keep trying to (re)attach to the sensor for as long as the device exists. */

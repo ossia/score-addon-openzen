@@ -75,17 +75,44 @@ sensor coming back on a different port:
    remaining ports are tried and the serial number is verified over the wire
    once connected.
 
-### Bandwidth
+### Measurements are detected, not configured
 
-The measurement checkboxes are not a filter on our side: they map to the
-sensor's own `ZenImuProperty_Output*` flags. Every measurement enabled takes
-room in the frame the sensor puts on the wire, and at a fixed baud rate that is
-what decides the sample rate that can be reached. Turning off what a patch does
-not use is the most effective thing one can do here.
+Nothing about what a unit measures has to be picked by hand. On connection the
+sensor's `ZenImuProperty_Output*` flags are read back and a node is created for
+each measurement it actually produces - so a unit with a magnetometer gets
+`/imu/mag`, one without simply does not, and a GNSS component brings `/gnss/*`
+with it.
+
+Node creation is additive: a node is never removed once it exists. Unplugging a
+sensor, or reconnecting one that has been reconfigured in the meantime, leaves
+every cable drawn against it intact. The tree is saved with the document, so a
+score reopens with its full namespace whether or not the hardware is present.
 
 Which property gates which field depends on the firmware family, and getting it
-wrong changes the frame length rather than merely enabling the wrong value - see
+wrong changes the frame length rather than merely enabling the wrong value: the
+legacy firmware derives the calibrated vector host-side from the raw one behind
+a single flag, IG1 gates them separately, and the LPMS-BE1 reports its only gyro
+in the second slot. See `manager::read_capabilities` and
 `manager::apply_outputs`.
+
+### Bandwidth
+
+Turning *off* measurements is still available, behind "Detect measurements from
+the sensor". These map to the same `ZenImuProperty_Output*` flags: every
+measurement enabled takes room in the frame the sensor puts on the wire, and at
+a fixed baud rate that is what decides the sample rate that can be reached.
+
+### Serial port permissions on Linux
+
+`/dev/ttyUSB*` usually belongs to a group (`uucp`, `dialout` depending on the
+distribution) that a user is not in by default, and the sensor will sit in
+`failed` with a message saying so. Fix it once with:
+
+```bash
+sudo usermod -aG uucp $USER   # or dialout
+```
+
+then log out and back in.
 
 ## Testing
 

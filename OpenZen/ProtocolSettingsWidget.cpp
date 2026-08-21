@@ -88,11 +88,21 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
       tr("Minimum delay between updates sent into the score.\n"
          "Useful when the sensor streams faster than the patch needs."));
 
+  m_autoOutputs = new QCheckBox{tr("Detect measurements from the sensor"), this};
+  m_autoOutputs->setChecked(true);
+  m_autoOutputs->setToolTip(
+      tr("Read back what the sensor actually measures and create a node for each,\n"
+         "so nothing has to be picked by hand. Turn this off only to trade\n"
+         "measurements against bandwidth."));
+
   auto* outputs = new QGroupBox{tr("Measurements"), this};
+  m_outputsBox = outputs;
   outputs->setToolTip(
       tr("Only the measurements enabled here are produced by the sensor at all.\n"
          "Each one costs room in the frame it puts on the wire, so at a given baud\n"
          "rate this is what decides the sample rate that can be reached."));
+  connect(m_autoOutputs, &QCheckBox::toggled, outputs, &QWidget::setDisabled);
+  outputs->setDisabled(true);
 
   auto* outputsLayout = new QGridLayout{outputs};
   int row = 0, col = 0;
@@ -128,6 +138,7 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
   layout->addRow(tr("Sampling rate"), m_samplingRate);
   layout->addRow(tr("Filter mode"), m_filterMode);
   layout->addRow(QString{}, m_degrees);
+  layout->addRow(QString{}, m_autoOutputs);
   layout->addRow(outputs);
   layout->addRow(QString{}, m_autoReconnect);
   layout->addRow(tr("Link timeout"), m_watchdog);
@@ -153,6 +164,7 @@ Device::DeviceSettings ProtocolSettingsWidget::getSettings() const
   specif.samplingRate = m_samplingRate->value();
   specif.filterMode = m_filterMode->value();
   specif.degrees = m_degrees->isChecked();
+  specif.autoOutputs = m_autoOutputs->isChecked();
   specif.autoReconnect = m_autoReconnect->isChecked();
   specif.watchdogMs = m_watchdog->value();
   if(const int r = m_rate->value(); r > 0)
@@ -188,6 +200,8 @@ void ProtocolSettingsWidget::setSettings(const Device::DeviceSettings& settings)
   m_samplingRate->setValue(specif.samplingRate);
   m_filterMode->setValue(specif.filterMode);
   m_degrees->setChecked(specif.degrees);
+  m_autoOutputs->setChecked(specif.autoOutputs);
+  m_outputsBox->setDisabled(specif.autoOutputs);
   m_autoReconnect->setChecked(specif.autoReconnect);
   m_watchdog->setValue(specif.watchdogMs);
   m_rate->setValue(specif.rate ? *specif.rate : 0);

@@ -49,8 +49,16 @@ public:
   void on_link_event(const link_event&) override;
 
 private:
-  void build_tree(ossia::net::node_base& root);
-  void build_gnss_tree(ossia::net::node_base& root);
+  void build_base_tree(ossia::net::node_base& root);
+
+  /**
+   * Create the measurement nodes for what the sensor turned out to measure.
+   *
+   * Additive: a node is never removed once it exists, so unplugging a sensor
+   * - or reconnecting one that has been reconfigured - leaves every cable
+   * drawn against it intact.
+   */
+  void ensure_nodes(const capabilities& caps);
 
   //! Deliver a value, skipping it when nothing changed. Many IMU fields carry
   //! a slow quantity inside a fast frame; not republishing them keeps the
@@ -70,6 +78,9 @@ private:
   //! Set once the tree exists; until then callbacks have nowhere to go.
   bool m_ready{false};
   bool m_connected{false};
+
+  //! What we have already created nodes for.
+  capabilities m_caps;
 
   struct
   {
