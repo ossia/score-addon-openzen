@@ -17,6 +17,28 @@
 
 W_OBJECT_IMPL(OpenZen::ProtocolSettingsWidget)
 
+namespace
+{
+//! 0 means "leave the sensor alone". A hand-typed entry wins over the item
+//! data, so that a rate we do not list can still be requested.
+int sampling_rate_of(const QComboBox& box)
+{
+  bool ok = false;
+  const int typed = box.currentText().split(' ').front().toInt(&ok);
+  if(ok)
+    return typed;
+  return box.currentData().toInt();
+}
+
+void set_sampling_rate(QComboBox& box, int hz)
+{
+  if(const int idx = box.findData(hz); idx >= 0)
+    box.setCurrentIndex(idx);
+  else
+    box.setCurrentText(QStringLiteral("%1 Hz").arg(hz));
+}
+}
+
 namespace OpenZen
 {
 
@@ -52,11 +74,15 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
          "COM ports on Windows - the remembered port is tried first and the serial\n"
          "number is verified over the wire."));
 
-  m_samplingRate = new QSpinBox{this};
-  m_samplingRate->setRange(0, 1000);
-  m_samplingRate->setSuffix(tr(" Hz"));
-  m_samplingRate->setSpecialValueText(tr("Leave as-is"));
-  m_samplingRate->setValue(0);
+  // Sensors accept a fixed set of rates and answer anything else with a NACK,
+  // so offer the set rather than a free range. These are the LPMS3 values;
+  // the box stays editable because OpenZen supports other families, and the
+  // sensor's own list is reported in the log if it refuses what it is given.
+  m_samplingRate = new QComboBox{this};
+  m_samplingRate->setEditable(true);
+  m_samplingRate->addItem(tr("Leave as-is"), 0);
+  for(int hz : {5, 10, 50, 100, 250, 500})
+    m_samplingRate->addItem(QStringLiteral("%1 Hz").arg(hz), hz);
 
   m_filterMode = new QSpinBox{this};
   m_filterMode->setRange(-1, 10);
@@ -161,7 +187,7 @@ Device::DeviceSettings ProtocolSettingsWidget::getSettings() const
   specif.identifier = m_identifier->text();
   specif.baudRate = m_baudRate->currentText().toInt();
   specif.matchBySerial = m_matchBySerial->isChecked();
-  specif.samplingRate = m_samplingRate->value();
+  specif.samplingRate = sampling_rate_of(*m_samplingRate);
   specif.filterMode = m_filterMode->value();
   specif.degrees = m_degrees->isChecked();
   specif.autoOutputs = m_autoOutputs->isChecked();
@@ -197,7 +223,7 @@ void ProtocolSettingsWidget::setSettings(const Device::DeviceSettings& settings)
   m_baudRate->setCurrentText(
       specif.baudRate > 0 ? QString::number(specif.baudRate) : tr("Auto"));
   m_matchBySerial->setChecked(specif.matchBySerial);
-  m_samplingRate->setValue(specif.samplingRate);
+  set_sampling_rate(*m_samplingRate, specif.samplingRate);
   m_filterMode->setValue(specif.filterMode);
   m_degrees->setChecked(specif.degrees);
   m_autoOutputs->setChecked(specif.autoOutputs);

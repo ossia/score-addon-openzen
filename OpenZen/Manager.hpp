@@ -96,6 +96,11 @@ struct link_event
   //! Read back from the sensor on connection; drives the node tree.
   bool caps_valid{false};
   capabilities caps;
+
+  //! Sampling rates the sensor advertises. A sensor accepts only a fixed set
+  //! and answers anything else with a NACK, so this is what a caller needs in
+  //! order to ask for something valid.
+  std::vector<int32_t> supported_rates;
 };
 
 /**

@@ -33,7 +33,7 @@ private:
   QComboBox* m_baudRate{};
   QCheckBox* m_matchBySerial{};
 
-  QSpinBox* m_samplingRate{};
+  QComboBox* m_samplingRate{};
   QSpinBox* m_filterMode{};
   QCheckBox* m_degrees{};
   QCheckBox* m_autoOutputs{};

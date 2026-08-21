@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstring>
 #include <optional>
+#include <utility>
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <grp.h>
@@ -654,6 +655,31 @@ struct manager::impl
     set(ZenImuProperty_OutputGyr1BiasCalib, false);
   }
 
+  /** The sampling rates the sensor advertises. */
+  static std::vector<int32_t> supported_rates(zen::ZenSensorComponent& imu)
+  {
+    auto [err, rates] = imu.getArrayProperty<int32_t>(
+        ZenImuProperty_SupportedSamplingRates);
+    if(err != ZenError_None)
+      return {};
+
+    // The array comes back padded to the query buffer size.
+    std::erase_if(rates, [](int32_t r) { return r <= 0; });
+    return rates;
+  }
+
+  static std::string describe(const std::vector<int32_t>& rates)
+  {
+    if(rates.empty())
+      return "it does not report which rates it supports";
+
+    std::string out = "supported: ";
+    for(std::size_t i = 0; i < rates.size(); ++i)
+      out += (i ? ", " : "") + std::to_string(rates[i]);
+    out += " Hz";
+    return out;
+  }
+
   /**
    * Read back what the sensor is actually going to send us.
    *
@@ -750,13 +776,19 @@ struct manager::impl
     // Not fatal if refused: sensors only accept a fixed set of rates and
     // reject the rest with a NACK. Losing a working link over a preference is
     // the wrong trade - the sensor keeps whatever rate it had.
+    const auto rates = supported_rates(*imu);
+
     if(c.sampling_rate > 0
        && imu->setInt32Property(ZenImuProperty_SamplingRate, c.sampling_rate)
               != ZenError_None)
     {
+      // Ask the sensor which rates it does take, rather than guessing from a
+      // list that is only right for one model family. An LPMS3 accepts
+      // 5/10/50/100/250/500 and NACKs everything else, so "200 Hz" is a very
+      // easy mistake to make and a frustrating one without this.
       ossia::logger().warn(
-          "openzen: sensor refused a sampling rate of {} Hz, keeping its own",
-          c.sampling_rate);
+          "openzen: sensor refused a sampling rate of {} Hz, keeping its own ({})",
+          c.sampling_rate, describe(rates));
     }
 
     if(c.filter_mode >= 0)
@@ -770,6 +802,7 @@ struct manager::impl
     ev.message = std::string{"streaming from "} + desc.identifier;
     ev.info_valid = true;
     ev.model = model;
+    ev.supported_rates = rates;
     if(auto [e, serial] = sensor.getStringProperty(ZenSensorProperty_SerialNumber);
        e == ZenError_None)
       ev.serial = serial;

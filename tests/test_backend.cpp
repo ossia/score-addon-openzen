@@ -13,6 +13,7 @@
 #include <ZenTypes.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -31,6 +32,7 @@ struct recorder final : sensor_listener
   std::vector<link_event> events;
   capabilities caps;
   bool caps_seen{false};
+  std::vector<int32_t> rates;
 
   void on_imu_data(const ZenImuData&) override { imu_frames++; }
   void on_gnss_data(const ZenGnssData&) override { gnss_frames++; }
@@ -42,6 +44,8 @@ struct recorder final : sensor_listener
       caps = e.caps;
       caps_seen = true;
     }
+    if(!e.supported_rates.empty())
+      rates = e.supported_rates;
   }
 
   bool saw(link_state s) const
@@ -291,6 +295,24 @@ TEST_CASE("a connected sensor streams and reports what it measures", "[hardware]
   SECTION("the link reports itself as streaming")
   {
     CHECK(r.saw(link_state::streaming));
+  }
+
+  SECTION("the sensor reports which sampling rates it accepts")
+  {
+    // A sensor NACKs any rate outside its own set, so asking for one is a
+    // good way to lose a link that was working. LP-Research document
+    // 5/10/50/100/250/500 Hz for the LPMS3 family; this checks the hardware
+    // against that rather than trusting the datasheet.
+    INFO("advertised rates: " << [&] {
+      std::string s;
+      for(auto v : r.rates)
+        s += std::to_string(v) + " ";
+      return s;
+    }());
+
+    REQUIRE(!r.rates.empty());
+    CHECK(std::find(r.rates.begin(), r.rates.end(), 100) != r.rates.end());
+    CHECK(std::find(r.rates.begin(), r.rates.end(), 200) == r.rates.end());
   }
 
   mgr.release(s);
