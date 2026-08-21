@@ -1,0 +1,10 @@
+{
+  "src": "<url to the .zip file created by the release script>",
+  "name": "OpenZen IMU",
+  "raw_name": "score-addon-openzen",
+  "version": "0.1",
+  "kind": "addon",
+  "short": "LP-Research IMUs through OpenZen",
+  "long": "Access LPMS inertial measurement units over serial, USB and Bluetooth through the OpenZen library. Sensors are matched by serial number so that they are found again after being replugged, and a link that goes away is reconnected without disturbing the device tree.",
+  "key": "0d6c7f24-19b5-4a8e-9f3d-2e5a7c1b40d9"
+}
