@@ -1,5 +1,7 @@
 #include "Protocol.hpp"
 
+#include "Mapping.hpp"
+
 #include <ossia/detail/logger.hpp>
 #include <ossia/network/base/device.hpp>
 #include <ossia/network/base/node.hpp>
@@ -255,12 +257,11 @@ void protocol::on_imu_data(const ZenImuData& d)
 
   // ZenImuData carries the quaternion as (w, x, y, z); ossia's orientation
   // dataspace stores (x, y, z, w) - see euler_u::to_neutral in libossia.
-  emit_vec<4>(
-      m_params.quaternion, m_last.quaternion, {d.q[1], d.q[2], d.q[3], d.q[0]});
+  emit_vec<4>(m_params.quaternion, m_last.quaternion, to_ossia_quaternion(d.q));
 
   // LPMS reports Euler angles as (roll, pitch, yaw); ossia's euler unit is
   // (yaw, pitch, roll).
-  emit_vec<3>(m_params.euler, m_last.euler, {d.r[2], d.r[1], d.r[0]});
+  emit_vec<3>(m_params.euler, m_last.euler, to_ossia_euler(d.r));
 
   emit_vec<3>(m_params.accel, m_last.accel, {d.a[0], d.a[1], d.a[2]});
   emit_vec<3>(m_params.gyro, m_last.gyro, {d.g[0], d.g[1], d.g[2]});
@@ -338,9 +339,11 @@ void protocol::on_link_event(const link_event& ev)
     emit(m_params.firmware, ev.firmware);
   }
 
-  if(ev.caps_valid && !(ev.caps == m_caps))
+  // Additive: a sensor that comes back reconfigured with fewer measurements
+  // must not take away nodes that a score already has cables to.
+  if(ev.caps_valid && adds_anything(m_caps, ev.caps))
   {
-    m_caps = ev.caps;
+    m_caps = merge(m_caps, ev.caps);
     ensure_nodes(m_caps);
   }
 }

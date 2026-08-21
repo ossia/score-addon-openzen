@@ -33,7 +33,9 @@ Device::DeviceSettings settings_for(const ossia::openzen::sensor_desc& d)
   specif.ioType = QString::fromStdString(d.io_type);
   specif.serialNumber = QString::fromStdString(d.serial);
   specif.identifier = QString::fromStdString(d.identifier);
-  specif.baudRate = int(d.baud_rate);
+  // Deliberately left at 0 (auto): the listing's baud rate is only what the
+  // IO system assumes, not what the sensor is running at. Probing decides.
+  specif.baudRate = 0;
   s.deviceSpecificSettings = QVariant::fromValue(specif);
   return s;
 }

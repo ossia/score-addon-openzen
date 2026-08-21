@@ -46,16 +46,45 @@ target_link_libraries(score_addon_openzen
 
 setup_score_plugin(score_addon_openzen)
 
-# Smoke test for the backend: runs without a score document, and above all
-# without hardware. See tests/manager_smoke.cpp.
-option(SCORE_ADDON_OPENZEN_TESTS "Build the OpenZen backend smoke test" OFF)
+# Tests. `test_mapping` needs nothing at all; `test_backend` runs the real
+# backend, and the cases tagged [hardware] are skipped when no sensor is
+# attached. `manager_smoke` is a standalone harness that prints a readable
+# trace and pauses so the cable can be pulled - handy when bringing up a new
+# sensor, but not something to run in CI.
+option(SCORE_ADDON_OPENZEN_TESTS "Build the OpenZen tests" OFF)
 if(SCORE_ADDON_OPENZEN_TESTS)
-  add_executable(score_addon_openzen_test
+  if(NOT TARGET Catch2::Catch2WithMain)
+    include(FetchContent)
+    FetchContent_Declare(
+      Catch2openzen
+      GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+      GIT_TAG v3.15.3
+      GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(Catch2openzen)
+  endif()
+
+  add_executable(score_addon_openzen_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mapping.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/OpenZen/Manager.cpp"
+  )
+  target_include_directories(score_addon_openzen_tests
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(score_addon_openzen_tests
+    PRIVATE Catch2::Catch2WithMain score_openzen ossia)
+  target_compile_features(score_addon_openzen_tests PRIVATE cxx_std_20)
+
+  # Only the cases that need no sensor, so this is safe to run anywhere.
+  add_test(NAME score_addon_openzen_tests
+           COMMAND score_addon_openzen_tests "~[hardware]")
+
+  add_executable(score_addon_openzen_smoke
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/manager_smoke.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/OpenZen/Manager.cpp"
   )
-  target_include_directories(score_addon_openzen_test
+  target_include_directories(score_addon_openzen_smoke
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-  target_link_libraries(score_addon_openzen_test PRIVATE score_openzen ossia)
-  target_compile_features(score_addon_openzen_test PRIVATE cxx_std_20)
+  target_link_libraries(score_addon_openzen_smoke PRIVATE score_openzen ossia)
+  target_compile_features(score_addon_openzen_smoke PRIVATE cxx_std_20)
 endif()

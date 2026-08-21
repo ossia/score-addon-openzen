@@ -56,7 +56,7 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
   m_samplingRate->setRange(0, 1000);
   m_samplingRate->setSuffix(tr(" Hz"));
   m_samplingRate->setSpecialValueText(tr("Leave as-is"));
-  m_samplingRate->setValue(200);
+  m_samplingRate->setValue(0);
 
   m_filterMode = new QSpinBox{this};
   m_filterMode->setRange(-1, 10);

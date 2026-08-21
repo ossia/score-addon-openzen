@@ -1,5 +1,7 @@
 #include "Manager.hpp"
 
+#include "Mapping.hpp"
+
 #include <ossia/detail/logger.hpp>
 
 #include <boost/asio/io_context.hpp>
@@ -38,13 +40,6 @@ constexpr auto k_backend_tick = std::chrono::milliseconds{50};
 
 //! Bounded so that a backlog can never stall the network thread.
 constexpr int k_max_events_per_tick = 1024;
-
-std::string identity_key(const session_config& c)
-{
-  // Serial first: it is the identity that survives a replug onto another port.
-  return c.io_type + '|'
-         + (!c.serial.empty() && c.match_by_serial ? c.serial : c.identifier);
-}
 
 /**
  * Explain why a port could not be opened.
@@ -120,6 +115,15 @@ struct session::backend_state
 
   clock::time_point next_attempt{};
   std::chrono::milliseconds backoff{k_backoff_min};
+
+  //! Position in the (candidate x baud rate) probe, one pair per attempt so
+  //! that a sensor working through eight baud rates does not monopolise the
+  //! thread every other sensor shares.
+  std::size_t probe_index{0};
+
+  //! The baud rate that last worked; tried first, so a reconnection is
+  //! immediate rather than probing all over again.
+  uint32_t last_good_baud{0};
 
   //! The port we last connected on successfully; tried first next time.
   std::string last_good_identifier;
@@ -387,13 +391,12 @@ struct manager::impl
 
         case link_state::searching:
         case link_state::failed:
+        case link_state::connecting:
+          // try_connect is synchronous, so `connecting` here means it is
+          // partway through the baud-rate probe and wants its next turn.
           anyone_searching = true;
           if(now >= s.m_backend->next_attempt)
             try_connect(s, now);
-          break;
-
-        case link_state::connecting:
-          // try_connect is synchronous, so this is never observed here.
           break;
       }
     }
@@ -480,10 +483,17 @@ struct manager::impl
     return out;
   }
 
+  //! Baud rates to try for this session, best first.
+  static std::vector<uint32_t> baud_candidates_for(const session& s)
+  {
+    return baud_candidates(
+        s.m_backend->last_good_baud, s.m_config.baud_rate, default_probe_bauds());
+  }
+
   void try_connect(session& s, clock::time_point now)
   {
     auto& b = *s.m_backend;
-    auto candidates = candidates_for(s);
+    const auto candidates = candidates_for(s);
 
     if(candidates.empty())
     {
@@ -496,54 +506,83 @@ struct manager::impl
                 ? "waiting for " + s.m_config.identifier
                 : "waiting for sensor " + s.m_config.serial);
       }
+      b.probe_index = 0;
       b.next_attempt = now + k_scan_interval;
       return;
     }
 
+    const auto bauds = baud_candidates_for(s);
+    const std::size_t total = candidates.size() * bauds.size();
+    if(b.probe_index >= total)
+      b.probe_index = 0;
+
+    // One (port, baud rate) pair per attempt. Each failed negotiation costs
+    // OpenZen a couple of seconds of IO timeouts, and the backend thread is
+    // shared with every other sensor, so we must hand it back in between.
+    auto desc = candidates[b.probe_index / bauds.size()];
+    const uint32_t baud = bauds[b.probe_index % bauds.size()];
+    desc.baudRate = baud;
+
     s.m_state.store(link_state::connecting);
-    emit_event(s, link_state::connecting, "connecting");
+    emit_event(
+        s, link_state::connecting,
+        "connecting to " + std::string{desc.identifier} + " at "
+            + std::to_string(baud) + " baud");
 
-    for(const auto& desc : candidates)
+    auto [err, sensor] = data_client->obtainSensor(desc);
+    if(err == ZenSensorInitError_None)
     {
-      auto [err, sensor] = data_client->obtainSensor(desc);
-      if(err != ZenSensorInitError_None)
-        continue;
-
       // The IO system did not advertise a serial, so check the one the sensor
       // reports before we accept this port as ours.
+      bool mine = true;
       if(s.m_config.match_by_serial && !s.m_config.serial.empty()
          && desc.serialNumber[0] == '\0')
       {
         auto [perr, serial] = sensor.getStringProperty(ZenSensorProperty_SerialNumber);
         if(perr == ZenError_None && !serial.empty() && serial != s.m_config.serial)
-          continue; // ~ZenSensor releases it
+          mine = false; // ~ZenSensor releases it
       }
 
-      if(!configure(s, sensor, desc))
-        continue;
+      if(mine && configure(s, sensor, desc))
+      {
+        b.last_good_identifier = desc.identifier;
+        b.last_good_baud = baud;
+        b.probe_index = 0;
+        b.backoff = k_backoff_min;
+        s.m_last_data.store(now_ns(), std::memory_order_relaxed);
+        s.m_state.store(link_state::streaming);
+        publish_dispatch();
+        return;
+      }
+    }
 
-      b.last_good_identifier = desc.identifier;
-      b.backoff = k_backoff_min;
-      s.m_last_data.store(now_ns(), std::memory_order_relaxed);
-      s.m_state.store(link_state::streaming);
-      publish_dispatch();
+    // A port we cannot even open will not open at another baud rate either.
+    const auto why = explain_open_failure(desc.identifier);
+    if(!why.empty())
+    {
+      b.probe_index = 0;
+      b.backoff = std::min(b.backoff * 2, k_backoff_max);
+      b.next_attempt = now + b.backoff;
+      s.m_state.store(link_state::failed);
+      emit_event(s, link_state::failed, why);
       return;
     }
 
+    if(++b.probe_index < total)
+    {
+      // Keep probing without waiting; other sensors get a turn in between.
+      b.next_attempt = now;
+      s.m_state.store(link_state::connecting);
+      return;
+    }
+
+    b.probe_index = 0;
     b.backoff = std::min(b.backoff * 2, k_backoff_max);
     b.next_attempt = now + b.backoff;
     s.m_state.store(link_state::failed);
-
-    std::string why;
-    for(const auto& desc : candidates)
-    {
-      why = explain_open_failure(desc.identifier);
-      if(!why.empty())
-        break;
-    }
     emit_event(
         s, link_state::failed,
-        why.empty() ? std::string{"could not open the sensor"} : why);
+        "no reply from " + std::string{desc.identifier} + " at any baud rate");
   }
 
   /**
@@ -659,16 +698,15 @@ struct manager::impl
     c.accel = get(ZenImuProperty_OutputAccCalibrated);
     c.mag = get(ZenImuProperty_OutputMagCalib);
 
-    if(model.find("BE1") != std::string::npos)
-    {
-      c.gyro_raw = get(ZenImuProperty_OutputRawGyr1);
-      c.gyro = get(ZenImuProperty_OutputGyr1AlignCalib);
-    }
-    else
-    {
-      c.gyro_raw = get(ZenImuProperty_OutputRawGyr0);
-      c.gyro = get(ZenImuProperty_OutputGyr0AlignCalib);
-    }
+    // Either gyro slot may be the one in use, and the model name does not
+    // reliably say which: an LPMS-CURS3 reports through the second slot just
+    // as an LPMS-BE1 does. Whichever is enabled is the one whose values reach
+    // ZenImuData.
+    (void)model;
+    c.gyro_raw
+        = get(ZenImuProperty_OutputRawGyr0) || get(ZenImuProperty_OutputRawGyr1);
+    c.gyro = get(ZenImuProperty_OutputGyr0AlignCalib)
+             || get(ZenImuProperty_OutputGyr1AlignCalib);
     return c;
   }
 
@@ -709,11 +747,16 @@ struct manager::impl
     if(!c.auto_outputs)
       apply_outputs(*imu, c, model);
 
-    if(c.sampling_rate > 0)
+    // Not fatal if refused: sensors only accept a fixed set of rates and
+    // reject the rest with a NACK. Losing a working link over a preference is
+    // the wrong trade - the sensor keeps whatever rate it had.
+    if(c.sampling_rate > 0
+       && imu->setInt32Property(ZenImuProperty_SamplingRate, c.sampling_rate)
+              != ZenError_None)
     {
-      if(imu->setInt32Property(ZenImuProperty_SamplingRate, c.sampling_rate)
-         != ZenError_None)
-        return false;
+      ossia::logger().warn(
+          "openzen: sensor refused a sampling rate of {} Hz, keeping its own",
+          c.sampling_rate);
     }
 
     if(c.filter_mode >= 0)

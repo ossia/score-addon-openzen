@@ -9,6 +9,7 @@
 #include <ossia/network/context.hpp>
 #include <ossia/network/context_functions.hpp>
 
+#include <OpenZenCAPI.h>
 #include <ZenTypes.h>
 
 #include <atomic>
@@ -79,8 +80,13 @@ void spin(ossia::net::network_context& ctx, std::chrono::milliseconds d)
 }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+  if(argc > 1 && std::string{argv[1]} == "-v")
+    ZenSetLogLevel(ZenLogLevel_Debug);
+  else
+    ZenSetLogLevel(ZenLogLevel_Warning);
+
   auto ctx = ossia::net::create_network_context();
 
   std::printf("== bringing up the backend ==\n");
@@ -177,13 +183,15 @@ int main()
     cfg.io_type = found[0].io_type;
     cfg.serial = found[0].serial;
     cfg.identifier = found[0].identifier;
-    cfg.baud_rate = found[0].baud_rate;
+    // 0: let the backend probe. The listing's rate is only what the IO system
+    // assumes, not what the sensor is running at.
+    cfg.baud_rate = 0;
     // auto_outputs is on by default: what the sensor measures is read back
     // from the hardware rather than picked here.
 
     listener l;
     auto s = mgr.acquire(cfg, l);
-    for(int i = 0; i < 40 && l.imu_frames == 0; ++i)
+    for(int i = 0; i < 240 && l.imu_frames == 0; ++i)
       spin(*ctx, 250ms);
 
     check(l.imu_frames > 0, "IMU frames arrive");

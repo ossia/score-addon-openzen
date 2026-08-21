@@ -114,16 +114,44 @@ sudo usermod -aG uucp $USER   # or dialout
 
 then log out and back in.
 
-## Testing
+### Baud rate
 
-`tests/manager_smoke.cpp` exercises the backend with and without hardware; the
-no-hardware path is the one that must never hang.
+The rate a unit runs at is whatever was last written to its flash, and no IO
+system can report it before connecting: OpenZen assumes a default and gives up
+when that is wrong. 921600 is the LPMS factory default while OpenZen's Linux
+backend assumes 115200, so any fixed guess is wrong for some sensor. The
+backend therefore probes, one rate per attempt so that a sensor working
+through the list does not monopolise the thread every other sensor shares, and
+remembers what worked so reconnection is immediate.
+
+The sampling rate is left alone by default for the same reason: sensors accept
+only a fixed set of rates and answer the rest with a NACK, and losing a working
+link over a preference is the wrong trade. Setting one that the sensor refuses
+is reported and otherwise ignored.
+
+## Testing
 
 ```bash
 cmake . -DSCORE_ADDON_OPENZEN_TESTS=1
-cmake --build . --target score_addon_openzen_test
-./score_addon_openzen_test
+cmake --build . --target score_addon_openzen_tests
+./score_addon_openzen_tests            # everything
+./score_addon_openzen_tests "~[hardware]"   # only what needs no sensor
+./score_addon_openzen_tests "[hardware]"    # only what does
 ```
 
-With a sensor attached it will also stream from it, and pauses so that the
-cable can be pulled to watch the watchdog fire.
+- `tests/test_mapping.cpp` covers the pure functions - axis conventions,
+  identity, baud ordering, the additive capability merge. These are where a
+  silent mistake produces plausible-looking but wrong numbers, so they are
+  tested against hand-worked values.
+- `tests/test_backend.cpp` runs the real backend. The cases tagged
+  `[hardware]` are skipped when no sensor is attached; the rest cover the
+  paths that must hold when nothing is plugged in, which is the normal state
+  of affairs while a score is being written.
+
+`ctest` runs the no-hardware subset. There is also
+`score_addon_openzen_smoke`, a standalone harness that prints a readable trace
+and pauses so the cable can be pulled to watch the watchdog fire - useful when
+bringing up a new sensor, not something for CI.
+
+Add `-DSCORE_ADDON_OPENZEN_VERBOSE=1` to log every frame exchanged with the
+sensor; that is how the CURS3 problems above were found.

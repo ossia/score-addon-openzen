@@ -67,8 +67,12 @@ struct SpecificSettings
   /** Prefer serialNumber over identifier when both are known. */
   bool matchBySerial{true};
 
-  /** Sensor sampling rate in Hz. 0 leaves whatever the sensor is set to. */
-  int samplingRate{200};
+  /**
+   * Sensor sampling rate in Hz. 0, the default, leaves the sensor at whatever
+   * it is configured for - sensors only accept a fixed set of rates and NACK
+   * the rest, so imposing one is a good way to break a link that worked.
+   */
+  int samplingRate{0};
 
   /** ZenImuProperty_FilterMode. -1 leaves whatever the sensor is set to. */
   int filterMode{-1};

@@ -113,7 +113,10 @@ struct session_config
   uint32_t baud_rate{0};
   bool match_by_serial{true};
 
-  int sampling_rate{200};
+  //! 0 leaves the sensor at whatever rate it is configured for. Sensors
+  //! accept only a fixed set of rates and NACK the rest, so imposing one is a
+  //! good way to break a link that was working.
+  int sampling_rate{0};
   int filter_mode{-1};
   bool degrees{true};
 

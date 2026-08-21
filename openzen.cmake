@@ -141,6 +141,14 @@ target_compile_definitions(score_openzen
     $<$<BOOL:${OPENZEN_BLUETOOTH}>:ZEN_BLUETOOTH=1>
 )
 
+# Turns on OpenZen's SPDLOG_DEBUG traces, which log every frame exchanged with
+# the sensor. Invaluable when a unit will not negotiate, far too noisy
+# otherwise.
+option(SCORE_ADDON_OPENZEN_VERBOSE "Log every frame exchanged with the sensor" OFF)
+if(SCORE_ADDON_OPENZEN_VERBOSE)
+  target_compile_definitions(score_openzen PRIVATE SPDLOG_ACTIVE_LEVEL=1)
+endif()
+
 target_compile_features(score_openzen PRIVATE cxx_std_17)
 set_target_properties(score_openzen PROPERTIES
   CXX_EXTENSIONS OFF
