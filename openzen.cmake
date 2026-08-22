@@ -68,10 +68,18 @@ elseif(APPLE)
     "${OPENZEN_ROOT}/src/io/systems/mac/MacDeviceSystem.cpp"
     "${OPENZEN_ROOT}/src/utility/posix/PosixDll.cpp"
   )
-else()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND OPENZEN_SRCS
     "${OPENZEN_ROOT}/src/io/interfaces/posix/PosixDeviceInterface.cpp"
     "${OPENZEN_ROOT}/src/io/systems/linux/LinuxDeviceSystem.cpp"
+    "${OPENZEN_ROOT}/src/utility/posix/PosixDll.cpp"
+  )
+else()
+  # LinuxDeviceSystem is not "any POSIX": it enumerates /sys/class/tty and uses
+  # Linux-only termios rates (B576000). The other BSDs get the POSIX interface
+  # with no device enumeration, which is enough to open a port by path.
+  list(APPEND OPENZEN_SRCS
+    "${OPENZEN_ROOT}/src/io/interfaces/posix/PosixDeviceInterface.cpp"
     "${OPENZEN_ROOT}/src/utility/posix/PosixDll.cpp"
   )
 endif()
@@ -79,7 +87,7 @@ endif()
 # Classic Bluetooth (RFCOMM) support. Needs libbluetooth on Linux, IOBluetooth
 # on macOS, bthprops on Windows.
 set(OPENZEN_BLUETOOTH 0)
-if(UNIX AND NOT APPLE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_library(OPENZEN_LIBBLUETOOTH NAMES bluetooth)
   if(OPENZEN_LIBBLUETOOTH)
     set(OPENZEN_BLUETOOTH 1)
