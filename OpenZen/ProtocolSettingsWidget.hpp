@@ -26,6 +26,9 @@ public:
   void setSettings(const Device::DeviceSettings& settings) override;
 
 private:
+  //! Fill the rate box from the sensor's own list where we know it.
+  void refreshSamplingRates();
+
   QLineEdit* m_deviceNameEdit{};
   QLineEdit* m_serial{};
   QLineEdit* m_identifier{};

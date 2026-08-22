@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -273,6 +274,20 @@ public:
    * is where DeviceEnumerator lives.
    */
   sensor_list sensors() const;
+
+  /**
+   * The sampling rates this sensor reported the last time it was connected,
+   * or an empty vector if it has not been connected in this session.
+   *
+   * A sensor NACKs any rate outside its own set, and that set does not always
+   * match the documentation - an LPMS-CURS3 advertises 5/10/50/100/500 where
+   * the LPMS3 command list also lists 250. So the settings dialog offers what
+   * the hardware said rather than what the datasheet says, whenever it can.
+   * Safe from any thread.
+   */
+  std::vector<int32_t>
+  known_rates(std::string_view io_type, std::string_view serial,
+              std::string_view identifier) const;
 
   /**
    * Ask for a device listing. Scans are also run automatically while any

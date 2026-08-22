@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstring>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -159,6 +160,11 @@ struct manager::impl
   // --- registry, backend thread + acquire/release ---
   std::mutex registry_mutex;
   std::vector<session_ptr> sessions;
+
+  //! identity_key -> the sampling rates that sensor reported on connection.
+  //! Written by the backend thread, read by the GUI; guarded by rates_mutex.
+  mutable std::mutex rates_mutex;
+  std::unordered_map<std::string, std::vector<int32_t>> rates_by_identity;
 
   // --- dispatch table: backend thread -> pump ---
   using dispatch_entry = std::pair<uintptr_t, session_ptr>;
@@ -777,6 +783,11 @@ struct manager::impl
     // reject the rest with a NACK. Losing a working link over a preference is
     // the wrong trade - the sensor keeps whatever rate it had.
     const auto rates = supported_rates(*imu);
+    if(!rates.empty())
+    {
+      std::lock_guard _{rates_mutex};
+      rates_by_identity[identity_key(c)] = rates;
+    }
 
     if(c.sampling_rate > 0
        && imu->setInt32Property(ZenImuProperty_SamplingRate, c.sampling_rate)
@@ -1059,6 +1070,28 @@ void manager::release(const session_ptr& s)
   c.kind = impl::command::disconnect;
   c.sess = s;
   m_impl->commands.enqueue(std::move(c));
+}
+
+std::vector<int32_t> manager::known_rates(
+    std::string_view io_type, std::string_view serial,
+    std::string_view identifier) const
+{
+  session_config probe;
+  probe.io_type = io_type;
+  probe.serial = serial;
+  probe.identifier = identifier;
+
+  std::lock_guard _{m_impl->rates_mutex};
+  // Try the serial-based identity first, then the port-based one: which key a
+  // session was stored under depends on whether it matched by serial.
+  for(bool by_serial : {true, false})
+  {
+    probe.match_by_serial = by_serial;
+    if(auto it = m_impl->rates_by_identity.find(identity_key(probe));
+       it != m_impl->rates_by_identity.end())
+      return it->second;
+  }
+  return {};
 }
 
 sensor_list manager::sensors() const

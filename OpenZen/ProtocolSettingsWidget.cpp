@@ -2,6 +2,8 @@
 
 #include "ProtocolFactory.hpp"
 
+#include <OpenZen/Manager.hpp>
+
 #include <State/Widgets/AddressFragmentLineEdit.hpp>
 
 #include <QCheckBox>
@@ -74,15 +76,21 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
          "COM ports on Windows - the remembered port is tried first and the serial\n"
          "number is verified over the wire."));
 
-  // Sensors accept a fixed set of rates and answer anything else with a NACK,
-  // so offer the set rather than a free range. These are the LPMS3 values;
-  // the box stays editable because OpenZen supports other families, and the
-  // sensor's own list is reported in the log if it refuses what it is given.
+  // Sensors accept a fixed set of rates and NACK anything else, so offer the
+  // set rather than a free range. It is read from the sensor itself where we
+  // have ever connected to it - the documented list is not always right: an
+  // LPMS-CURS3 advertises 5/10/50/100/500 where the LPMS3 command list also
+  // claims 250. Stays editable, because these lists are advisory.
   m_samplingRate = new QComboBox{this};
   m_samplingRate->setEditable(true);
-  m_samplingRate->addItem(tr("Leave as-is"), 0);
-  for(int hz : {5, 10, 50, 100, 250, 500})
-    m_samplingRate->addItem(QStringLiteral("%1 Hz").arg(hz), hz);
+  refreshSamplingRates();
+
+  // The identity is what tells us which sensor's rates to show.
+  for(auto* w : {m_serial, m_identifier})
+    connect(w, &QLineEdit::editingFinished, this,
+            &ProtocolSettingsWidget::refreshSamplingRates);
+  connect(m_ioType, &QComboBox::currentTextChanged, this,
+          &ProtocolSettingsWidget::refreshSamplingRates);
 
   m_filterMode = new QSpinBox{this};
   m_filterMode->setRange(-1, 10);
@@ -175,6 +183,39 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
 
 ProtocolSettingsWidget::~ProtocolSettingsWidget() = default;
 
+void ProtocolSettingsWidget::refreshSamplingRates()
+{
+  const auto rates = ossia::openzen::manager::instance().known_rates(
+      m_ioType->currentText().toStdString(), m_serial->text().toStdString(),
+      m_identifier->text().toStdString());
+
+  // Keep whatever the user had selected across the repopulation.
+  const int current = sampling_rate_of(*m_samplingRate);
+
+  QSignalBlocker _{m_samplingRate};
+  m_samplingRate->clear();
+  m_samplingRate->addItem(tr("Leave as-is"), 0);
+
+  if(!rates.empty())
+  {
+    for(auto hz : rates)
+      m_samplingRate->addItem(QStringLiteral("%1 Hz").arg(hz), hz);
+    m_samplingRate->setToolTip(
+        tr("Rates reported by this sensor. Anything else will be refused."));
+  }
+  else
+  {
+    // Never connected to this one, so we can only offer the documented set.
+    for(int hz : {5, 10, 50, 100, 250, 500})
+      m_samplingRate->addItem(QStringLiteral("%1 Hz").arg(hz), hz);
+    m_samplingRate->setToolTip(
+        tr("Typical rates for this sensor family. The real set is read from the\n"
+           "sensor once it has connected, and a refused rate is reported then."));
+  }
+
+  set_sampling_rate(*m_samplingRate, current);
+}
+
 Device::DeviceSettings ProtocolSettingsWidget::getSettings() const
 {
   Device::DeviceSettings s;
@@ -223,6 +264,8 @@ void ProtocolSettingsWidget::setSettings(const Device::DeviceSettings& settings)
   m_baudRate->setCurrentText(
       specif.baudRate > 0 ? QString::number(specif.baudRate) : tr("Auto"));
   m_matchBySerial->setChecked(specif.matchBySerial);
+  // Identity fields are set above, so the rates can now be looked up.
+  refreshSamplingRates();
   set_sampling_rate(*m_samplingRate, specif.samplingRate);
   m_filterMode->setValue(specif.filterMode);
   m_degrees->setChecked(specif.degrees);

@@ -297,6 +297,22 @@ TEST_CASE("a connected sensor streams and reports what it measures", "[hardware]
     CHECK(r.saw(link_state::streaming));
   }
 
+  SECTION("the rates are remembered for the settings dialog")
+  {
+    // The dialog has no session and cannot block on the hardware, so it asks
+    // the manager for whatever the sensor said last time it connected.
+    const auto remembered = manager::instance().known_rates(
+        cfg.io_type, cfg.serial, cfg.identifier);
+    CHECK(remembered == r.rates);
+
+    SECTION("and an unknown sensor simply reports nothing")
+    {
+      CHECK(manager::instance()
+                .known_rates(cfg.io_type, "no-such-serial-9999", "/dev/nope")
+                .empty());
+    }
+  }
+
   SECTION("the sensor reports which sampling rates it accepts")
   {
     // A sensor NACKs any rate outside its own set, so asking for one is a
