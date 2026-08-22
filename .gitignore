@@ -1,2 +1,7 @@
 build/
 build-*/
+
+# In-source configure leftovers
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
