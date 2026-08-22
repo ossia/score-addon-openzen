@@ -157,6 +157,14 @@ if(SCORE_ADDON_OPENZEN_VERBOSE)
   target_compile_definitions(score_openzen PRIVATE SPDLOG_ACTIVE_LEVEL=1)
 endif()
 
+# ImuComponent.cpp converts rad/s to deg/s with M_PI, which is a POSIX
+# extension: the Microsoft CRT only defines it when asked, and only before
+# <math.h> is first included - hence a compile definition rather than a #define
+# in the file, whose own includes would already have pulled it in.
+if(WIN32)
+  target_compile_definitions(score_openzen PRIVATE _USE_MATH_DEFINES)
+endif()
+
 target_compile_features(score_openzen PRIVATE cxx_std_17)
 set_target_properties(score_openzen PROPERTIES
   CXX_EXTENSIONS OFF
