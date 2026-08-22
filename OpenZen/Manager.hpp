@@ -15,14 +15,16 @@
 #include <thread>
 #include <vector>
 
+// Not forward-declared: score builds Asio with BOOST_ASIO_ENABLE_VERSION_NAMESPACE
+// on Windows, which puts io_context in an inline versioned namespace. A hand-
+// written `namespace boost::asio { class io_context; }` then declares a second,
+// different type and every use of it is ambiguous.
+#include <boost/asio/io_context.hpp>
+
 // OpenZen's own types, forward-declared so that this header stays cheap.
 struct ZenImuData;
 struct ZenGnssData;
 
-namespace boost::asio
-{
-class io_context;
-}
 
 namespace ossia::openzen
 {
