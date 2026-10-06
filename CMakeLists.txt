@@ -44,6 +44,16 @@ target_link_libraries(score_addon_openzen
     score_openzen
 )
 
+if(COMMAND score_register_license)
+  score_register_license(OpenZen URL "https://bitbucket.org/lpresearch/openzen" FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/openzen/LICENSE")
+  score_register_license(GSL URL "https://github.com/microsoft/GSL" FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/GSL/LICENSE")
+  score_register_license(expected-lite URL "https://github.com/martinmoene/expected-lite" FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/expected-lite/LICENSE.txt")
+  if(OPENZEN_BLUETOOTH)
+    score_register_license(bluetooth-serial-port URL "https://github.com/Agamnentzar/bluetooth-serial-port"
+      FILES "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/openzen/src/utility/bluetooth-serial-port/LICENSE.md")
+  endif()
+endif()
+
 setup_score_plugin(score_addon_openzen)
 
 # Tests. `test_mapping` needs nothing at all; `test_backend` runs the real
