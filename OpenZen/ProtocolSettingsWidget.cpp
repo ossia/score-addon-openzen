@@ -70,11 +70,7 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
   m_matchBySerial = new QCheckBox{tr("Match by serial number"), this};
   m_matchBySerial->setChecked(true);
   m_matchBySerial->setToolTip(
-      tr("Find the sensor by its serial number rather than by the port it was last\n"
-         "seen on, so that it is still found after being plugged in elsewhere.\n"
-         "Where the driver cannot report a serial number before connecting - plain\n"
-         "COM ports on Windows - the remembered port is tried first and the serial\n"
-         "number is verified over the wire."));
+      tr("Match the sensor by serial number, even if its port changes."));
 
   // Sensors accept a fixed set of rates and NACK anything else, so offer the
   // set rather than a free range. It is read from the sensor itself where we
@@ -108,8 +104,7 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
   m_watchdog->setSuffix(tr(" ms"));
   m_watchdog->setValue(500);
   m_watchdog->setToolTip(
-      tr("How long the sensor may stay silent before the link is considered lost.\n"
-         "OpenZen does not report unplugged devices, so this is what detects them."));
+      tr("Time without sensor data before the connection is considered lost."));
 
   // 0 means "as fast as the sensor produces"; anything else wraps the
   // protocol in a rate_limiting_protocol.
@@ -119,22 +114,15 @@ ProtocolSettingsWidget::ProtocolSettingsWidget(QWidget* parent)
   m_rate->setSpecialValueText(tr("Unlimited"));
   m_rate->setValue(0);
   m_rate->setToolTip(
-      tr("Minimum delay between updates sent into the score.\n"
-         "Useful when the sensor streams faster than the patch needs."));
+      tr("Minimum delay between updates sent to score."));
 
   m_autoOutputs = new QCheckBox{tr("Detect measurements from the sensor"), this};
   m_autoOutputs->setChecked(true);
-  m_autoOutputs->setToolTip(
-      tr("Read back what the sensor actually measures and create a node for each,\n"
-         "so nothing has to be picked by hand. Turn this off only to trade\n"
-         "measurements against bandwidth."));
 
   auto* outputs = new QGroupBox{tr("Measurements"), this};
   m_outputsBox = outputs;
   outputs->setToolTip(
-      tr("Only the measurements enabled here are produced by the sensor at all.\n"
-         "Each one costs room in the frame it puts on the wire, so at a given baud\n"
-         "rate this is what decides the sample rate that can be reached."));
+      tr("Select which measurements the sensor transmits."));
   connect(m_autoOutputs, &QCheckBox::toggled, outputs, &QWidget::setDisabled);
   outputs->setDisabled(true);
 
@@ -209,8 +197,7 @@ void ProtocolSettingsWidget::refreshSamplingRates()
     for(int hz : {5, 10, 50, 100, 250, 500})
       m_samplingRate->addItem(QStringLiteral("%1 Hz").arg(hz), hz);
     m_samplingRate->setToolTip(
-        tr("Typical rates for this sensor family. The real set is read from the\n"
-           "sensor once it has connected, and a refused rate is reported then."));
+        tr("Suggested rates; supported rates are read after connection."));
   }
 
   set_sampling_rate(*m_samplingRate, current);
