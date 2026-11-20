@@ -174,7 +174,8 @@ set_target_properties(score_openzen PROPERTIES
 
 # Third-party code: we do not want score's warning set applied to it.
 if(MSVC)
-  target_compile_options(score_openzen PRIVATE /w)
+  # fmt requires UTF-8 when pulled in by spdlog's headers.
+  target_compile_options(score_openzen PRIVATE /w /utf-8)
 else()
   target_compile_options(score_openzen PRIVATE -w)
 endif()
